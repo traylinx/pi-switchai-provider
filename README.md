@@ -2,15 +2,15 @@
 
 A [pi coding agent](https://github.com/mariozechner/pi-mono) provider extension that routes chat completions through [switchAILocal](../switchAILocal) — a unified OpenAI-compatible gateway to MiniMax, Anthropic, Gemini, Ollama, Groq, and other upstream model providers.
 
-> **Status:** `v0.1.0` — first working draft. Model list is hand-curated against `switchAILocal`'s typical `config.yaml`. Dynamic model discovery, OAuth, and streaming metadata enrichment are on the roadmap.
+> **Status:** `v0.2.0` — dynamic discovery. The extension queries the gateway's `/models` endpoint at load and registers everything it finds, applying curated capability metadata for ~20 well-known chat models and conservative defaults for the rest. OAuth passthrough, dynamic capability probing, and per-model cost reporting are still on the roadmap.
 
 ## Why
 
 `pi` ships built-in providers for OpenAI, Anthropic, Google, Groq, xAI, Bedrock, and friends — but if you run a local gateway that fronts all of them behind one endpoint, you don't want to juggle N API keys and N `--provider` flags. This extension gives you a single `switchai` provider that:
 
 - Uses one env var: `AIL_API_KEY`
-- Points at one URL: `http://localhost:18080/v1`
-- Lets `pi` see every model your `switchAILocal` config exposes as `provider:model_id`
+- Points at one URL (default `http://localhost:18080/v1`, override with `AIL_BASE_URL`)
+- Auto-discovers whichever models your `switchAILocal` config exposes — no rebuild when the upstream list changes
 
 ## Install
 
@@ -42,7 +42,7 @@ ln -s ~/src/pi-switchai-provider your-project/.pi/extensions/switchai-provider
 
 ## Prerequisites
 
-1. **switchAILocal** running and reachable at `http://localhost:18080`. Start it with:
+1. **switchAILocal** running and reachable (default `http://localhost:18080`). Start it with:
    ```bash
    cd switchAILocal && ./ail.sh
    ```
@@ -52,51 +52,84 @@ ln -s ~/src/pi-switchai-provider your-project/.pi/extensions/switchai-provider
    ```
 3. **`pi`** `>=0.67.0`.
 
+### Environment variables
+
+| Var            | Required | Default                      | Purpose                                                                                                  |
+|----------------|----------|------------------------------|----------------------------------------------------------------------------------------------------------|
+| `AIL_API_KEY`  | yes      | —                            | Bearer token forwarded to the gateway.                                                                   |
+| `AIL_BASE_URL` | no       | `http://localhost:18080/v1`  | Point at a remote gateway. Trailing slash and missing `/vN` suffix are handled — `http://host:8080` works. |
+
+Use `AIL_BASE_URL` to share one extension across a local gateway and a [Tytus](https://github.com/traylinx/tytus) private pod, e.g. `AIL_BASE_URL=http://10.42.42.1:18080/v1 pi`.
+
 ## Usage
 
 ```bash
-# Default model (MiniMax-M2.7 via switchai)
+# Uses pi's default selection logic (most recently selected switchai model).
 pi --provider switchai
 
-# Pick a specific model
+# Pick specific models — any ID the gateway exposes works:
+pi --provider switchai --model claude-opus-4-6
+pi --provider switchai --model gpt-5.4
+pi --provider switchai --model gemini-2.5-pro
 pi --provider switchai --model minimax:MiniMax-M2.7
-pi --provider switchai --model anthropic:claude-opus-4-6
-pi --provider switchai --model switchai:switchai-reasoner
 
-# Check gateway connectivity from inside pi
+# Check gateway connectivity and counts from inside pi
 /switchai-status
 ```
 
-## Bundled models
+## How model discovery works
 
-| Model ID                         | Context | Max out | Reasoning | Images |
-|----------------------------------|---------|---------|-----------|--------|
-| `minimax:MiniMax-M2.7` (default) | 1M      | 16K     | yes       | no     |
-| `minimax:MiniMax-M2`             | 1M      | 16K     | yes       | no     |
-| `anthropic:claude-sonnet-4-6`    | 1M      | 64K     | yes       | yes    |
-| `anthropic:claude-opus-4-6`      | 1M      | 128K    | yes       | yes    |
-| `switchai:switchai-fast`         | 128K    | 16K     | no        | no     |
-| `switchai:switchai-reasoner`     | 128K    | 16K     | yes       | no     |
+On extension load, the factory queries `${AIL_BASE_URL}/models` and merges the response against an internal curated metadata overlay. The result is registered with `pi.registerProvider("switchai", …)`.
 
-The model IDs use `<upstream>:<model>` format so `switchAILocal` can route them to the correct backend. The list is intentionally hand-curated for v0.1.0 — if your `switchAILocal` exposes a model that isn't listed, fall back to a built-in provider for now or add it to `SWITCHAI_MODELS` in `index.ts`.
+**Three-tier registration:**
+
+1. **Curated + present in gateway** — registered with full metadata (reasoning flags, input modalities, real context/max-output limits, cost). ~20 models in v0.2.0: the Claude 4.5/4.6 family, GPT-5.4/5.2/5-mini, Gemini 2.5 Pro/Flash/Flash-Lite, DeepSeek v3.2, Qwen3 Max, Kimi K2.5, GLM 4.6/4.7, MiniMax M2.7/M2.5, Xiaomi MiMo v2 Omni.
+2. **Unknown chat model in gateway** — registered with conservative defaults: text-only, non-reasoning, 128K context, 8K max output, cost = 0.
+3. **Non-chat in gateway** — skipped entirely. Filtered by regex against `embed|image|dall|flux|whisper|tts|asr|rerank|-mt-|-ocr|…` to keep embeddings, image-gen, TTS, and translation models out of the chat-completions selector.
+
+**Fallback when the gateway is unreachable:** the full 20-model curated list is registered anyway (blind) so the extension still boots and pi can render a selector. A warning is written to stderr.
+
+### Startup log
+
+Every load prints one line to stderr:
+
+```
+[switchai] http://localhost:18080/v1 → 411 models on gateway · 20 curated + 284 with defaults registered (107 non-chat filtered)
+```
 
 ## Commands
 
-- `/switchai-status` — pings `http://localhost:18080/v1/models` with `AIL_API_KEY` and reports how many models the gateway currently exposes.
+- **`/switchai-status`** — pings `${AIL_BASE_URL}/models` with `AIL_API_KEY` and reports the gateway URL, total model count, and the curated/default split that was registered at startup.
+
+## Adding curated metadata for a new model
+
+Open `index.ts`, find `CURATED_METADATA`, and add an entry keyed by the exact gateway model ID:
+
+```ts
+"your-model-id": {
+  name: "Your Model",
+  reasoning: true,
+  input: ["text", "image"],
+  cost: { input: 1.25, output: 5, cacheRead: 0.12, cacheWrite: 0 },
+  contextWindow: 200_000,
+  maxTokens: 32_000,
+},
+```
+
+Cost is per million tokens. Reload with pi's `/reload` or restart.
 
 ## Roadmap
 
-This release covers the minimum needed to make `pi --provider switchai` work end-to-end. Planned follow-ups:
+v0.2.0 covers dynamic discovery, configurable baseUrl, and a real startup health check. Still planned:
 
-- **Dynamic model discovery.** Replace the hand-curated `SWITCHAI_MODELS` list with a startup fetch of `GET /v1/models` so the extension auto-tracks whatever `switchAILocal`'s `config.yaml` exposes.
-- **Per-model capability probe.** Query the gateway's model metadata endpoint to fill in `reasoning`, `input` modalities, `contextWindow`, and `cost` instead of hardcoding them.
-- **OAuth passthrough.** Support `switchAILocal`'s upstream OAuth flows (Anthropic Pro/Max, Google) so users don't need a separate `AIL_API_KEY`.
-- **Health check on startup.** Warn loudly if the gateway isn't reachable instead of waiting for the first completion to fail.
-- **Cost reporting.** Pull real per-token pricing from `switchAILocal` so `pi`'s session cost tracker reflects reality for paid upstreams.
-- **Configurable `baseUrl`.** Read `AIL_BASE_URL` so users can point at a remote `switchAILocal` instance instead of `localhost:18080`.
-- **Streaming metadata.** Surface upstream provider info in the stream events for better telemetry inside `pi`.
+- **Per-model capability probe.** Switch from a hand-maintained `CURATED_METADATA` overlay to live metadata from a richer gateway endpoint (`/v1/models/{id}` with `context_length`, `supports_vision`, `supports_reasoning`, pricing) once `switchAILocal` exposes one.
+- **OAuth passthrough.** Let the extension reuse `switchAILocal`'s upstream OAuth flows (Anthropic Pro/Max, Google, GitHub Copilot) so users don't need a separate `AIL_API_KEY`.
+- **Real cost reporting.** Pull per-token pricing from the gateway so `pi`'s session cost tracker reflects reality for paid upstreams instead of showing 0.
+- **Model filter / allowlist.** `AIL_MODELS="claude-*,gpt-5*"` glob env var to trim 300+ registrations down to what a user actually cares about.
+- **Streaming metadata.** Surface the upstream provider (`owned_by`) in pi's stream events for better telemetry.
+- **Multimodal omni.** Wire `mimo-v2-omni` audio/video inputs through once pi gains non-image media support.
 
-Contributions welcome — see `CONTRIBUTING.md` (TODO) and the issue tracker.
+Contributions welcome.
 
 ## License
 
