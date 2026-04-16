@@ -40,6 +40,32 @@ function getBaseUrl(): string {
 	return /\/v\d+$/.test(noTrailing) ? noTrailing : `${noTrailing}/v1`;
 }
 
+// AIL_MODELS — optional comma-separated glob allowlist. When set, only
+// model IDs matching at least one glob survive registration. Globs use
+// `*` (any chars). Empty / unset = no filter (register everything).
+//
+// Example: AIL_MODELS="claude-*,gpt-5*,minimax:*" trims the 304-model
+// default registration down to just three families, making pi's /model
+// selector usable.
+function getAllowlistPatterns(): RegExp[] {
+	const raw = process.env.AIL_MODELS?.trim();
+	if (!raw) return [];
+	return raw
+		.split(",")
+		.map((p) => p.trim())
+		.filter((p) => p.length > 0)
+		.map((pattern) => {
+			// Escape regex metachars except `*`, then convert `*` → `.*`.
+			const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+			return new RegExp(`^${escaped}$`);
+		});
+}
+
+function matchesAllowlist(id: string, patterns: RegExp[]): boolean {
+	if (patterns.length === 0) return true;
+	return patterns.some((r) => r.test(id));
+}
+
 // Heuristic filter for non-chat models the gateway may expose.
 // switchAILocal hosts embeddings, image gen, TTS, ASR, translation, rerank,
 // and OCR models alongside chat completions. Calling them via the chat
@@ -330,16 +356,33 @@ interface BuildStats {
 	discoveredRegistered: number;
 	gatewayTotal: number;
 	skipped: number;
+	allowlistFiltered: number;
+	allowlistActive: boolean;
 }
 
-function buildModelList(gatewayModels: GatewayModel[] | null): { models: ProviderModelConfig[]; stats: BuildStats } {
-	// No gateway response: register everything in CURATED_METADATA blindly.
-	// Better a working subset than a dead extension.
+function buildModelList(
+	gatewayModels: GatewayModel[] | null,
+	allowlist: RegExp[] = [],
+): { models: ProviderModelConfig[]; stats: BuildStats } {
+	const allowlistActive = allowlist.length > 0;
+
+	// No gateway response: register everything in CURATED_METADATA blindly
+	// (apply allowlist if set — better a trimmed working subset than a
+	// dead extension, and user's allowlist intent should still hold).
 	if (gatewayModels === null) {
-		const models = Object.entries(CURATED_METADATA).map(([id, meta]) => toProviderModel(id, meta));
+		const all = Object.entries(CURATED_METADATA);
+		const filtered = all.filter(([id]) => matchesAllowlist(id, allowlist));
+		const models = filtered.map(([id, meta]) => toProviderModel(id, meta));
 		return {
 			models,
-			stats: { curatedRegistered: models.length, discoveredRegistered: 0, gatewayTotal: 0, skipped: 0 },
+			stats: {
+				curatedRegistered: models.length,
+				discoveredRegistered: 0,
+				gatewayTotal: 0,
+				skipped: 0,
+				allowlistFiltered: all.length - filtered.length,
+				allowlistActive,
+			},
 		};
 	}
 
@@ -348,22 +391,30 @@ function buildModelList(gatewayModels: GatewayModel[] | null): { models: Provide
 	let curatedRegistered = 0;
 	let discoveredRegistered = 0;
 	let skipped = 0;
+	let allowlistFiltered = 0;
 
 	// Pass 1: curated models that exist in the gateway.
 	for (const [id, meta] of Object.entries(CURATED_METADATA)) {
-		if (gatewayIds.has(id)) {
-			registered.push(toProviderModel(id, meta));
-			curatedRegistered++;
+		if (!gatewayIds.has(id)) continue;
+		if (!matchesAllowlist(id, allowlist)) {
+			allowlistFiltered++;
+			continue;
 		}
+		registered.push(toProviderModel(id, meta));
+		curatedRegistered++;
 	}
 	const registeredIds = new Set(registered.map((m) => m.id));
 
 	// Pass 2: everything else the gateway exposes that looks chat-capable,
-	// registered with defaults.
+	// registered with defaults. Allowlist also applies here.
 	for (const gwModel of gatewayModels) {
 		if (registeredIds.has(gwModel.id)) continue;
 		if (!isLikelyChatModel(gwModel.id)) {
 			skipped++;
+			continue;
+		}
+		if (!matchesAllowlist(gwModel.id, allowlist)) {
+			allowlistFiltered++;
 			continue;
 		}
 		registered.push(toProviderModel(gwModel.id, { ...DEFAULT_METADATA, name: `${gwModel.id} (via switchai)` }));
@@ -372,7 +423,14 @@ function buildModelList(gatewayModels: GatewayModel[] | null): { models: Provide
 
 	return {
 		models: registered,
-		stats: { curatedRegistered, discoveredRegistered, gatewayTotal: gatewayModels.length, skipped },
+		stats: {
+			curatedRegistered,
+			discoveredRegistered,
+			gatewayTotal: gatewayModels.length,
+			skipped,
+			allowlistFiltered,
+			allowlistActive,
+		},
 	};
 }
 
@@ -383,16 +441,25 @@ function buildModelList(gatewayModels: GatewayModel[] | null): { models: Provide
 export default async function (pi: ExtensionAPI): Promise<void> {
 	const baseUrl = getBaseUrl();
 	const apiKey = process.env.AIL_API_KEY ?? "";
+	const allowlist = getAllowlistPatterns();
 
 	const gatewayModels = await fetchGatewayModels(baseUrl, apiKey);
-	const { models, stats } = buildModelList(gatewayModels);
+	const { models, stats } = buildModelList(gatewayModels, allowlist);
 
 	if (gatewayModels !== null) {
+		const allowlistNote = stats.allowlistActive
+			? ` · AIL_MODELS allowlist active (${stats.allowlistFiltered} filtered out)`
+			: "";
 		process.stderr.write(
 			`[switchai] ${baseUrl} → ${stats.gatewayTotal} models on gateway · ` +
 				`${stats.curatedRegistered} curated + ${stats.discoveredRegistered} with defaults registered ` +
-				`(${stats.skipped} non-chat filtered)\n`,
+				`(${stats.skipped} non-chat filtered)${allowlistNote}\n`,
 		);
+		if (stats.allowlistActive && models.length === 0) {
+			process.stderr.write(
+				`[switchai] WARNING: AIL_MODELS matched 0 models — check your patterns (commas between, '*' wildcards). switchai provider registered with empty model list.\n`,
+			);
+		}
 	}
 
 	pi.registerProvider("switchai", {

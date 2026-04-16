@@ -1,6 +1,6 @@
 {
   "name": "@switchai/pi-provider",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "switchai provider for pi coding agent — routes completions through the switchAILocal gateway.",
   "type": "module",
   "license": "Apache-2.0",
