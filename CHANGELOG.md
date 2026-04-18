@@ -5,6 +5,28 @@ All notable changes to `@traylinx/pi-switchai-provider` are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.2] — 2026-04-18
+
+### Fixed
+
+- README install commands. `pi install <name>` treats bare package names as filesystem paths — npm packages need the `npm:` prefix (`pi install npm:@traylinx/pi-switchai-provider`). The non-existent `-g` flag was replaced with documentation of the `-l` flag (project-local install, opposite of the user-global default). Verified live against a clean temp dir; `settings.json` now records both `git:` and `npm:` sources correctly.
+
+## [0.3.1] — 2026-04-18
+
+### Added
+
+- **First npm publish** as `@traylinx/pi-switchai-provider` (Apache-2.0, public). Renamed from the originally intended `@switchai/pi-provider` because the `switchai` org does not exist on npm — Traylinx org did, so we shipped under that scope.
+- Unit tests for `getBaseUrl`, `getAllowlistPatterns`, `matchesAllowlist`, and `buildModelList` using vitest (34 tests).
+- GitHub Actions CI workflow running `tsc --noEmit` + `vitest run` on push / PR.
+
+### Changed
+
+- README updated to document `AIL_MODELS` in the env var table, add an npm install path, and refresh the roadmap status (allowlist shipped in 0.3.0).
+
+### Known issue (fixed in 0.3.2)
+
+- README's install instructions were untested and shipped with wrong commands: bare `@traylinx/...` without the `npm:` prefix, and a non-existent `-g` flag for user-global install. Use v0.3.2.
+
 ## [0.3.0] — 2026-04-16
 
 ### Added

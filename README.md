@@ -2,7 +2,7 @@
 
 A [pi coding agent](https://github.com/mariozechner/pi-mono) provider extension that routes chat completions through [switchAILocal](https://github.com/traylinx/switchAILocal) — a local unified gateway that fronts Gemini CLI, Claude Code, Codex, OpenCode, Vibe (use your existing tool subscriptions), local models (Ollama, LM Studio), and cloud APIs (MiniMax, Anthropic, OpenAI, Google Gemini, Groq) behind a single OpenAI-compatible endpoint at `http://localhost:18080`.
 
-> **Status:** `v0.3.1` — published to npm as `@traylinx/pi-switchai-provider`. Dynamic discovery + glob allowlist. The extension queries the gateway's `/models` endpoint at load and registers the intersection of curated metadata and live gateway models. `AIL_MODELS` lets you trim registrations to a focused subset. OAuth passthrough, live capability probing, and real cost reporting are still on the roadmap.
+> **Status:** `v0.3.2` — published to npm as `@traylinx/pi-switchai-provider`. Dynamic discovery + glob allowlist. The extension queries the gateway's `/models` endpoint at load and registers the intersection of curated metadata and live gateway models. `AIL_MODELS` lets you trim registrations to a focused subset. OAuth passthrough, live capability probing, and real cost reporting are still on the roadmap.
 
 ## Why
 
@@ -14,31 +14,32 @@ A [pi coding agent](https://github.com/mariozechner/pi-mono) provider extension 
 
 ## Install
 
-### From npm (recommended)
+pi's install command takes a **source spec**: either `npm:<scoped-name>` or `github:<owner>/<repo>`. Bare package names are treated as filesystem paths, so the `npm:` prefix is required for npm installs.
+
+### From npm (recommended, user-global)
 
 ```bash
-cd your-project
-pi install @traylinx/pi-switchai-provider
+pi install npm:@traylinx/pi-switchai-provider
 ```
+
+Installs under `~/.pi/agent/extensions/`, picked up by every project on the next `pi` invocation — no rebuild, no config edit.
 
 ### From GitHub (track `main` without waiting for a release)
 
 ```bash
-cd your-project
 pi install github:traylinx/pi-switchai-provider
 ```
 
-Either form drops the extension under `.pi/extensions/` and the provider registers on the next `pi` invocation — no rebuild, no config edit.
+### Project-local instead of user-global
 
-### Global
+Add `-l` to drop the extension under the current project's `.pi/extensions/` folder instead of the user-level location:
 
 ```bash
-pi install -g @traylinx/pi-switchai-provider
+cd your-project
+pi install -l npm:@traylinx/pi-switchai-provider
 # or
-pi install -g github:traylinx/pi-switchai-provider
+pi install -l github:traylinx/pi-switchai-provider
 ```
-
-Installs under `~/.pi/agent/extensions/` so every project picks it up.
 
 ### Development (symlink from a checkout)
 
