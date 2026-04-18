@@ -2,7 +2,7 @@
 
 A [pi coding agent](https://github.com/mariozechner/pi-mono) provider extension that routes chat completions through [switchAILocal](https://github.com/traylinx/switchAILocal) — a local unified gateway that fronts Gemini CLI, Claude Code, Codex, OpenCode, Vibe (use your existing tool subscriptions), local models (Ollama, LM Studio), and cloud APIs (MiniMax, Anthropic, OpenAI, Google Gemini, Groq) behind a single OpenAI-compatible endpoint at `http://localhost:18080`.
 
-> **Status:** `v0.3.0` — dynamic discovery + glob allowlist. The extension queries the gateway's `/models` endpoint at load and registers the intersection of curated metadata and live gateway models. `AIL_MODELS` lets you trim registrations to a focused subset. OAuth passthrough, live capability probing, and real cost reporting are still on the roadmap.
+> **Status:** `v0.3.1` — published to npm as `@switchai/pi-provider`. Dynamic discovery + glob allowlist. The extension queries the gateway's `/models` endpoint at load and registers the intersection of curated metadata and live gateway models. `AIL_MODELS` lets you trim registrations to a focused subset. OAuth passthrough, live capability probing, and real cost reporting are still on the roadmap.
 
 ## Why
 
@@ -14,18 +14,27 @@ A [pi coding agent](https://github.com/mariozechner/pi-mono) provider extension 
 
 ## Install
 
-### Project-local (recommended while iterating)
+### From npm (recommended)
+
+```bash
+cd your-project
+pi install @switchai/pi-provider
+```
+
+### From GitHub (track `main` without waiting for a release)
 
 ```bash
 cd your-project
 pi install github:traylinx/pi-switchai-provider
 ```
 
-`pi install` drops the extension under `.pi/extensions/` and the provider registers on the next `pi` invocation — no rebuild, no config edit.
+Either form drops the extension under `.pi/extensions/` and the provider registers on the next `pi` invocation — no rebuild, no config edit.
 
 ### Global
 
 ```bash
+pi install -g @switchai/pi-provider
+# or
 pi install -g github:traylinx/pi-switchai-provider
 ```
 
@@ -61,8 +70,17 @@ ln -s ~/src/pi-switchai-provider your-project/.pi/extensions/switchai-provider
 |----------------|----------|------------------------------|----------------------------------------------------------------------------------------------------------|
 | `AIL_API_KEY`  | yes      | —                            | Bearer token forwarded to the gateway.                                                                   |
 | `AIL_BASE_URL` | no       | `http://localhost:18080/v1`  | Point at a remote gateway. Trailing slash and missing `/vN` suffix are handled — `http://host:8080` works. |
+| `AIL_MODELS`   | no       | *(unset → register everything)* | Comma-separated glob allowlist. Only model IDs matching at least one glob are registered. `*` matches any chars. |
 
 Use `AIL_BASE_URL` to share one extension across a local gateway and a [Tytus](https://github.com/traylinx/tytus) private pod, e.g. `AIL_BASE_URL=http://10.42.42.1:18080/v1 pi`.
+
+Use `AIL_MODELS` to keep `pi`'s `/model` selector usable when the gateway exposes hundreds of models:
+
+```bash
+# Only the Claude 4.x family, GPT-5 family, and every MiniMax model
+export AIL_MODELS="claude-*,gpt-5*,minimax:*"
+pi --provider switchai
+```
 
 ## Usage
 
@@ -92,12 +110,20 @@ On extension load, the factory queries `${AIL_BASE_URL}/models` and merges the r
 
 **Fallback when the gateway is unreachable:** the full 20-model curated list is registered anyway (blind) so the extension still boots and pi can render a selector. A warning is written to stderr.
 
+If `AIL_MODELS` is set, a final allowlist pass filters both tiers before registration — including in the offline-fallback path, so the allowlist is honored even when the gateway is unreachable.
+
 ### Startup log
 
 Every load prints one line to stderr:
 
 ```
 [switchai] http://localhost:18080/v1 → 411 models on gateway · 20 curated + 284 with defaults registered (107 non-chat filtered)
+```
+
+With an active allowlist:
+
+```
+[switchai] http://localhost:18080/v1 → 411 models on gateway · 12 curated + 8 with defaults registered (107 non-chat filtered) · AIL_MODELS allowlist active (284 filtered out)
 ```
 
 ## Commands
@@ -134,6 +160,16 @@ Still planned:
 - **Multimodal omni.** Wire `mimo-v2-omni` audio/video inputs through once pi gains non-image media support.
 
 Contributions welcome.
+
+## Development
+
+```bash
+git clone https://github.com/traylinx/pi-switchai-provider
+cd pi-switchai-provider
+npm install
+npm test          # unit tests for pure helpers
+npm run typecheck # tsc --noEmit
+```
 
 ## License
 
