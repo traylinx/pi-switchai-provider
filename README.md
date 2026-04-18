@@ -1,8 +1,8 @@
-# @switchai/pi-provider
+# @traylinx/pi-switchai-provider
 
 A [pi coding agent](https://github.com/mariozechner/pi-mono) provider extension that routes chat completions through [switchAILocal](https://github.com/traylinx/switchAILocal) — a local unified gateway that fronts Gemini CLI, Claude Code, Codex, OpenCode, Vibe (use your existing tool subscriptions), local models (Ollama, LM Studio), and cloud APIs (MiniMax, Anthropic, OpenAI, Google Gemini, Groq) behind a single OpenAI-compatible endpoint at `http://localhost:18080`.
 
-> **Status:** `v0.3.1` — published to npm as `@switchai/pi-provider`. Dynamic discovery + glob allowlist. The extension queries the gateway's `/models` endpoint at load and registers the intersection of curated metadata and live gateway models. `AIL_MODELS` lets you trim registrations to a focused subset. OAuth passthrough, live capability probing, and real cost reporting are still on the roadmap.
+> **Status:** `v0.3.1` — published to npm as `@traylinx/pi-switchai-provider`. Dynamic discovery + glob allowlist. The extension queries the gateway's `/models` endpoint at load and registers the intersection of curated metadata and live gateway models. `AIL_MODELS` lets you trim registrations to a focused subset. OAuth passthrough, live capability probing, and real cost reporting are still on the roadmap.
 
 ## Why
 
@@ -18,7 +18,7 @@ A [pi coding agent](https://github.com/mariozechner/pi-mono) provider extension 
 
 ```bash
 cd your-project
-pi install @switchai/pi-provider
+pi install @traylinx/pi-switchai-provider
 ```
 
 ### From GitHub (track `main` without waiting for a release)
@@ -33,7 +33,7 @@ Either form drops the extension under `.pi/extensions/` and the provider registe
 ### Global
 
 ```bash
-pi install -g @switchai/pi-provider
+pi install -g @traylinx/pi-switchai-provider
 # or
 pi install -g github:traylinx/pi-switchai-provider
 ```

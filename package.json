@@ -1,5 +1,5 @@
 {
-  "name": "@switchai/pi-provider",
+  "name": "@traylinx/pi-switchai-provider",
   "version": "0.3.1",
   "description": "switchai provider for pi coding agent — routes completions through the switchAILocal gateway.",
   "type": "module",
