@@ -24,9 +24,9 @@
  *   pi --provider switchai --model claude-opus-4-6
  */
 
-import type { AssistantMessageEventStream, Model } from "@mariozechner/pi-ai";
+import type { AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from "@mariozechner/pi-ai";
 import { streamSimpleOpenAICompletions } from "@mariozechner/pi-ai";
-import type { Context, ExtensionAPI, SimpleStreamOptions } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 // =============================================================================
 // Configuration
@@ -34,7 +34,7 @@ import type { Context, ExtensionAPI, SimpleStreamOptions } from "@mariozechner/p
 
 const DEFAULT_BASE_URL = "http://localhost:18080/v1";
 
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
 	const raw = process.env.AIL_BASE_URL?.trim() || DEFAULT_BASE_URL;
 	const noTrailing = raw.replace(/\/+$/, "");
 	return /\/v\d+$/.test(noTrailing) ? noTrailing : `${noTrailing}/v1`;
@@ -47,7 +47,7 @@ function getBaseUrl(): string {
 // Example: AIL_MODELS="claude-*,gpt-5*,minimax:*" trims the 304-model
 // default registration down to just three families, making pi's /model
 // selector usable.
-function getAllowlistPatterns(): RegExp[] {
+export function getAllowlistPatterns(): RegExp[] {
 	const raw = process.env.AIL_MODELS?.trim();
 	if (!raw) return [];
 	return raw
@@ -61,7 +61,7 @@ function getAllowlistPatterns(): RegExp[] {
 		});
 }
 
-function matchesAllowlist(id: string, patterns: RegExp[]): boolean {
+export function matchesAllowlist(id: string, patterns: RegExp[]): boolean {
 	if (patterns.length === 0) return true;
 	return patterns.some((r) => r.test(id));
 }
@@ -360,7 +360,7 @@ interface BuildStats {
 	allowlistActive: boolean;
 }
 
-function buildModelList(
+export function buildModelList(
 	gatewayModels: GatewayModel[] | null,
 	allowlist: RegExp[] = [],
 ): { models: ProviderModelConfig[]; stats: BuildStats } {
@@ -466,9 +466,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		baseUrl,
 		apiKey: "AIL_API_KEY",
 		api: "openai-completions",
-		streamSimple: (model: Model, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream => {
-			return streamSimpleOpenAICompletions(model, context, options);
-		},
+		streamSimple: (model, context, options) =>
+			streamSimpleOpenAICompletions(model as Model<"openai-completions">, context, options) as any,
 		models,
 	});
 

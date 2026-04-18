@@ -1,8 +1,8 @@
 # @switchai/pi-provider
 
-A [pi coding agent](https://github.com/mariozechner/pi-mono) provider extension that routes chat completions through [switchAILocal](../switchAILocal) — a unified OpenAI-compatible gateway to MiniMax, Anthropic, Gemini, Ollama, Groq, and other upstream model providers.
+A [pi coding agent](https://github.com/mariozechner/pi-mono) provider extension that routes chat completions through [switchAILocal](https://github.com/traylinx/switchAILocal) — a local unified gateway that fronts Gemini CLI, Claude Code, Codex, OpenCode, Vibe (use your existing tool subscriptions), local models (Ollama, LM Studio), and cloud APIs (MiniMax, Anthropic, OpenAI, Google Gemini, Groq) behind a single OpenAI-compatible endpoint at `http://localhost:18080`.
 
-> **Status:** `v0.2.0` — dynamic discovery. The extension queries the gateway's `/models` endpoint at load and registers everything it finds, applying curated capability metadata for ~20 well-known chat models and conservative defaults for the rest. OAuth passthrough, dynamic capability probing, and per-model cost reporting are still on the roadmap.
+> **Status:** `v0.3.0` — dynamic discovery + glob allowlist. The extension queries the gateway's `/models` endpoint at load and registers the intersection of curated metadata and live gateway models. `AIL_MODELS` lets you trim registrations to a focused subset. OAuth passthrough, live capability probing, and real cost reporting are still on the roadmap.
 
 ## Why
 
@@ -44,7 +44,10 @@ ln -s ~/src/pi-switchai-provider your-project/.pi/extensions/switchai-provider
 
 1. **switchAILocal** running and reachable (default `http://localhost:18080`). Start it with:
    ```bash
-   cd switchAILocal && ./ail.sh
+   # Quickest: npx (no checkout needed)
+   npx @traylinx/switchailocal
+   # Or from a checkout
+   cd ~/src/switchAILocal && ./ail.sh start
    ```
 2. **`AIL_API_KEY`** exported in your shell:
    ```bash
@@ -83,7 +86,7 @@ On extension load, the factory queries `${AIL_BASE_URL}/models` and merges the r
 
 **Three-tier registration:**
 
-1. **Curated + present in gateway** — registered with full metadata (reasoning flags, input modalities, real context/max-output limits, cost). ~20 models in v0.2.0: the Claude 4.5/4.6 family, GPT-5.4/5.2/5-mini, Gemini 2.5 Pro/Flash/Flash-Lite, DeepSeek v3.2, Qwen3 Max, Kimi K2.5, GLM 4.6/4.7, MiniMax M2.7/M2.5, Xiaomi MiMo v2 Omni.
+1. **Curated + present in gateway** — registered with full metadata (reasoning flags, input modalities, real context/max-output limits, cost). ~20 models: the Claude 4.5/4.6 family, GPT-5.4/5.2/5-mini, Gemini 2.5 Pro/Flash/Flash-Lite, DeepSeek v3.2, Qwen3 Max, Kimi K2.5, GLM 4.6/4.7, MiniMax M2.7/M2.5, Xiaomi MiMo v2 Omni.
 2. **Unknown chat model in gateway** — registered with conservative defaults: text-only, non-reasoning, 128K context, 8K max output, cost = 0.
 3. **Non-chat in gateway** — skipped entirely. Filtered by regex against `embed|image|dall|flux|whisper|tts|asr|rerank|-mt-|-ocr|…` to keep embeddings, image-gen, TTS, and translation models out of the chat-completions selector.
 
@@ -120,12 +123,13 @@ Cost is per million tokens. Reload with pi's `/reload` or restart.
 
 ## Roadmap
 
-v0.2.0 covers dynamic discovery, configurable baseUrl, and a real startup health check. Still planned:
+v0.2.0 covers dynamic discovery, configurable baseUrl, and a real startup health check. v0.3.0 adds the `AIL_MODELS` glob allowlist.
+
+Still planned:
 
 - **Per-model capability probe.** Switch from a hand-maintained `CURATED_METADATA` overlay to live metadata from a richer gateway endpoint (`/v1/models/{id}` with `context_length`, `supports_vision`, `supports_reasoning`, pricing) once `switchAILocal` exposes one.
 - **OAuth passthrough.** Let the extension reuse `switchAILocal`'s upstream OAuth flows (Anthropic Pro/Max, Google, GitHub Copilot) so users don't need a separate `AIL_API_KEY`.
 - **Real cost reporting.** Pull per-token pricing from the gateway so `pi`'s session cost tracker reflects reality for paid upstreams instead of showing 0.
-- **Model filter / allowlist.** `AIL_MODELS="claude-*,gpt-5*"` glob env var to trim 300+ registrations down to what a user actually cares about.
 - **Streaming metadata.** Surface the upstream provider (`owned_by`) in pi's stream events for better telemetry.
 - **Multimodal omni.** Wire `mimo-v2-omni` audio/video inputs through once pi gains non-image media support.
 

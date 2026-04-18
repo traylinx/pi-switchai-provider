@@ -19,7 +19,9 @@
     "LICENSE"
   ],
   "pi": {
-    "extensions": ["index.ts"]
+    "extensions": [
+      "index.ts"
+    ]
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": ">=0.67.0",
@@ -34,5 +36,13 @@
     "openai-compatible",
     "llm-gateway",
     "ai"
-  ]
+  ],
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.4"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
 }
