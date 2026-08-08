@@ -20,17 +20,8 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      # `npm install`, not `npm ci`. CI was red on every run because vitest 4 bundles rolldown, whose
-      # native binary ships as a PLATFORM-SPECIFIC optional dependency — and the lockfile records
-      # none of them (`grep -c rolldown-binding package-lock.json` -> 0, and regenerating it on macOS
-      # still produces 0). `npm ci` installs strictly from the lockfile, so the linux-x64 binding was
-      # never fetched and every run died with
-      #   Cannot find module '../rolldown-binding.linux-x64-gnu.node'
-      # `npm install` resolves on the runner and fetches the binding for the platform it is actually
-      # on. The tradeoff is a less strictly reproducible install, which is the right trade for a CI
-      # job that was providing no signal at all.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci
 
       - name: Type check
         run: npx tsc --noEmit
