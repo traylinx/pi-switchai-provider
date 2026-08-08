@@ -97,6 +97,14 @@ const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 // grows; unknown chat models still register with DEFAULTS below.
 const CURATED_METADATA: Record<string, ModelMetadata> = {
 	// --- MiniMax ---
+	"minimax:MiniMax-M3": {
+		name: "MiniMax M3",
+		reasoning: true,
+		input: ["text", "image"],
+		cost: ZERO_COST,
+		contextWindow: 1_000_000,
+		maxTokens: 16_384,
+	},
 	"minimax:MiniMax-M2.7": {
 		name: "MiniMax M2.7",
 		reasoning: true,
@@ -296,6 +304,26 @@ interface GatewayModel {
 	object?: string;
 	owned_by?: string;
 	capabilities?: string[];
+	modalities?: {
+		input?: string[];
+		output?: string[];
+	};
+	attachment?: boolean;
+	audio?: boolean;
+	vision?: boolean;
+	reasoning?: boolean;
+	// switchAILocal emits `context_length`. The other two spellings are accepted because other
+	// OpenAI-compatible gateways use them, but context_length is the one that actually arrives from
+	// the gateway this provider is named after — and it was missing, so EVERY model fell through to
+	// the curated/default window. Observed on a live router: ail-compound advertises
+	// context_length: 1000000 and registered as 128k, an 8x understatement that makes pi compact
+	// context long before it needs to.
+	context_length?: number;
+	context_window?: number;
+	contextWindow?: number;
+	max_output_tokens?: number;
+	max_tokens?: number;
+	maxTokens?: number;
 }
 
 interface GatewayModelsResponse {
@@ -351,6 +379,53 @@ function toProviderModel(id: string, meta: ModelMetadata): ProviderModelConfig {
 	};
 }
 
+function lowerList(values: unknown): string[] {
+	if (!Array.isArray(values)) return [];
+	return values.filter((v): v is string => typeof v === "string").map((v) => v.toLowerCase());
+}
+
+function deriveMetadataFromGateway(gwModel: GatewayModel, base: ModelMetadata): ModelMetadata {
+	const capabilities = lowerList(gwModel.capabilities);
+	const modalityInputs = lowerList(gwModel.modalities?.input);
+
+	const input = new Set<"text" | "image">(base.input);
+	if (modalityInputs.includes("text") || capabilities.includes("text")) input.add("text");
+	if (
+		modalityInputs.includes("image") ||
+		capabilities.includes("image") ||
+		capabilities.includes("vision") ||
+		gwModel.vision === true ||
+		gwModel.attachment === true
+	) {
+		input.add("image");
+	}
+
+	const reasoning =
+		typeof gwModel.reasoning === "boolean"
+			? gwModel.reasoning
+			: capabilities.includes("reasoning") || capabilities.includes("thinking")
+				? true
+				: base.reasoning;
+
+	// `context_length` FIRST: it is what switchAILocal actually sends. A positive-number guard rather
+	// than a bare ?? — a gateway that reports 0 or a negative window must not be believed into
+	// producing a model with no usable context at all.
+	const positive = (...values: Array<number | undefined>) =>
+		values.find((v) => typeof v === "number" && Number.isFinite(v) && v > 0);
+
+	return {
+		...base,
+		reasoning,
+		input: Array.from(input),
+		contextWindow:
+			positive(gwModel.context_length, gwModel.context_window, gwModel.contextWindow) ??
+			base.contextWindow,
+		maxTokens:
+			positive(gwModel.max_output_tokens, gwModel.max_tokens, gwModel.maxTokens) ??
+			base.maxTokens,
+	};
+}
+
 interface BuildStats {
 	curatedRegistered: number;
 	discoveredRegistered: number;
@@ -386,7 +461,8 @@ export function buildModelList(
 		};
 	}
 
-	const gatewayIds = new Set(gatewayModels.map((m) => m.id));
+	const gatewayById = new Map(gatewayModels.map((m) => [m.id, m] as const));
+	const gatewayIds = new Set(gatewayById.keys());
 	const registered: ProviderModelConfig[] = [];
 	let curatedRegistered = 0;
 	let discoveredRegistered = 0;
@@ -400,7 +476,7 @@ export function buildModelList(
 			allowlistFiltered++;
 			continue;
 		}
-		registered.push(toProviderModel(id, meta));
+		registered.push(toProviderModel(id, deriveMetadataFromGateway(gatewayById.get(id)!, meta)));
 		curatedRegistered++;
 	}
 	const registeredIds = new Set(registered.map((m) => m.id));
@@ -417,7 +493,12 @@ export function buildModelList(
 			allowlistFiltered++;
 			continue;
 		}
-		registered.push(toProviderModel(gwModel.id, { ...DEFAULT_METADATA, name: `${gwModel.id} (via switchai)` }));
+		registered.push(
+			toProviderModel(
+				gwModel.id,
+				deriveMetadataFromGateway(gwModel, { ...DEFAULT_METADATA, name: `${gwModel.id} (via switchai)` }),
+			),
+		);
 		discoveredRegistered++;
 	}
 

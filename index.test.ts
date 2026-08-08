@@ -152,6 +152,7 @@ describe("matchesAllowlist", () => {
 	it("matches namespace prefix (minimax:*)", () => {
 		const patterns = [/^minimax:.*$/];
 		expect(matchesAllowlist("minimax:MiniMax-M2.7", patterns)).toBe(true);
+		expect(matchesAllowlist("minimax:MiniMax-M3", patterns)).toBe(true);
 		expect(matchesAllowlist("minimax-m2.5:cloud", patterns)).toBe(false);
 	});
 
@@ -166,6 +167,7 @@ describe("matchesAllowlist", () => {
 		const patterns = [/^minimax:MiniMax-M2\.7$/];
 		expect(matchesAllowlist("minimax:MiniMax-M2.7", patterns)).toBe(true);
 		expect(matchesAllowlist("minimax:MiniMax-M2.5", patterns)).toBe(false);
+		expect(matchesAllowlist("minimax:MiniMax-M3", patterns)).toBe(false);
 	});
 });
 
@@ -176,14 +178,14 @@ describe("matchesAllowlist", () => {
 describe("buildModelList — gateway unavailable (null)", () => {
 	it("registers all curated models when gateway is null and no allowlist", () => {
 		const { models, stats } = buildModelList(null, []);
-		// CURATED_METADATA has 20 entries
-		expect(stats.curatedRegistered).toBe(20);
+		// CURATED_METADATA has 21 entries
+		expect(stats.curatedRegistered).toBe(21);
 		expect(stats.discoveredRegistered).toBe(0);
 		expect(stats.gatewayTotal).toBe(0);
 		expect(stats.skipped).toBe(0);
 		expect(stats.allowlistFiltered).toBe(0);
 		expect(stats.allowlistActive).toBe(false);
-		expect(models).toHaveLength(20);
+		expect(models).toHaveLength(21);
 	});
 
 	it("applies allowlist filter to curated list when gateway is null", () => {
@@ -198,7 +200,7 @@ describe("buildModelList — gateway unavailable (null)", () => {
 
 	it("stats reflect allowlistFiltered count correctly (total - registered)", () => {
 		const allowlist = [/^claude-.*$/];
-		const totalCurated = 20;
+		const totalCurated = 21;
 		const { stats } = buildModelList(null, allowlist);
 		expect(stats.allowlistFiltered).toBe(totalCurated - stats.curatedRegistered);
 	});
@@ -299,6 +301,35 @@ describe("buildModelList — gateway available", () => {
 		expect(m.name).toBe("some-totally-new-model-xyz (via switchai)");
 	});
 
+	it("derives image input support from gateway capabilities for unknown discovered models", () => {
+		const gatewayModels = [
+			{
+				id: "ail-compound",
+				capabilities: ["audio", "image", "vision", "text"],
+				modalities: { input: ["audio", "image", "text"], output: ["text"] },
+				vision: true,
+				attachment: true,
+			},
+		];
+		const { models } = buildModelList(gatewayModels, []);
+		expect(models[0].id).toBe("ail-compound");
+		expect(models[0].input).toContain("text");
+		expect(models[0].input).toContain("image");
+	});
+
+	it("lets live gateway capabilities upgrade curated model input metadata", () => {
+		const gatewayModels = [
+			{
+				id: "minimax:MiniMax-M2.7",
+				capabilities: ["text", "image", "vision"],
+				vision: true,
+			},
+		];
+		const { models } = buildModelList(gatewayModels, []);
+		expect(models[0].id).toBe("minimax:MiniMax-M2.7");
+		expect(models[0].input).toEqual(["text", "image"]);
+	});
+
 	it("marks all models as openai-completions api", () => {
 		const gatewayModels = [{ id: "claude-opus-4-6" }, { id: "unknown-chat-model" }];
 		const { models } = buildModelList(gatewayModels, []);
@@ -312,4 +343,68 @@ describe("buildModelList — gateway available", () => {
 		const { models } = buildModelList(gatewayModels, []);
 		expect(models[0].compat.supportsDeveloperRole).toBe(false);
 	});
+
+	// --- context window derivation (v0.3.3) ---------------------------------------------------
+	//
+	// These payloads are copied VERBATIM from a live switchAILocal /v1/models response, not invented.
+	// The field is `context_length`; the previous version read only context_window/contextWindow, so
+	// every gateway model silently fell back to the curated or default window. On the real router
+	// ail-compound advertises 1_000_000 and was registering as 128_000.
+	it("reads context_length — the field switchAILocal actually sends", () => {
+		const gatewayModels = [
+			{
+				id: "ail-compound",
+				capabilities: ["text"],
+				context_length: 1_000_000,
+				modalities: { input: ["text"], output: ["text"] },
+				attachment: false,
+				reasoning: false,
+				tool_call: true,
+			},
+		];
+		const { models } = buildModelList(gatewayModels, []);
+		expect(models[0].id).toBe("ail-compound");
+		expect(models[0].contextWindow).toBe(1_000_000);
+	});
+
+	it("still honours context_window and contextWindow from other gateways", () => {
+		const a = buildModelList([{ id: "ail-a", context_window: 250_000 }], []).models[0];
+		const b = buildModelList([{ id: "ail-b", contextWindow: 320_000 }], []).models[0];
+		expect(a.contextWindow).toBe(250_000);
+		expect(b.contextWindow).toBe(320_000);
+	});
+
+	it("prefers context_length when a gateway sends more than one spelling", () => {
+		const m = buildModelList(
+			[{ id: "ail-c", context_length: 1_000_000, context_window: 128_000 }],
+			[],
+		).models[0];
+		expect(m.contextWindow).toBe(1_000_000);
+	});
+
+	it("ignores a non-positive window instead of registering a model with no context", () => {
+		// A gateway reporting 0 must not be believed into producing an unusable model; fall back.
+		const m = buildModelList([{ id: "ail-d", context_length: 0 }], []).models[0];
+		expect(m.contextWindow).toBeGreaterThan(0);
+	});
+
+	it("derives the vision input from a real ail-vision payload", () => {
+		const m = buildModelList(
+			[
+				{
+					id: "ail-vision",
+					capabilities: ["image", "vision", "text"],
+					context_length: 1_048_576,
+					modalities: { input: ["image", "text"], output: ["text"] },
+					attachment: true,
+					vision: true,
+					tool_call: true,
+				},
+			],
+			[],
+		).models[0];
+		expect(m.contextWindow).toBe(1_048_576);
+		expect(m.input.sort()).toEqual(["image", "text"]);
+	});
+
 });

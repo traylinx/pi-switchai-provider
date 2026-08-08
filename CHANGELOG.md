@@ -5,6 +5,19 @@ All notable changes to `@traylinx/pi-switchai-provider` are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.3] — 2026-08-08
+
+### Added
+
+- **Model metadata is now derived from the gateway** (`deriveMetadataFromGateway`). Input modalities, vision/attachment support, reasoning, context window and max output tokens are read from `/v1/models` instead of relying solely on the curated table. Models the curated table has never heard of — such as switchAILocal's own `ail-*` aliases — now register with their real capabilities rather than the defaults.
+- Curated entry for `minimax:MiniMax-M3`.
+
+### Fixed
+
+- **`context_length` was not read, so every gateway model fell back to the curated or default context window.** switchAILocal emits `context_length`; the derivation only looked at `context_window` / `contextWindow`. Measured against a live router: `ail-compound` advertises `context_length: 1000000` and was registering as `128000`, an 8x understatement that makes pi compact context long before it needs to. `context_length` is now read first, with the other two spellings kept for gateways that use them.
+- A non-positive window from a gateway (`0` or negative) no longer produces a model with no usable context — it falls back instead of being believed.
+- `max_output_tokens` is accepted alongside `max_tokens` / `maxTokens`.
+
 ## [0.3.2] — 2026-04-18
 
 ### Fixed
